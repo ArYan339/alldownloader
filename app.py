@@ -6,15 +6,24 @@ import shutil
 import re
 
 def is_valid_url(url):
-    # Simple URL validation
     url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
     return url_pattern.match(url) is not None
 
 def get_available_formats(url):
-    ydl_opts = {'quiet': True, 'no_warnings': True}
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'ignoreerrors': True,
+        'no_color': True,
+        'cookiesfrombrowser': ('chrome',),  # Try to use cookies from Chrome
+    }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
+            if info is None:
+                raise Exception("Unable to extract video information")
+            
             formats = info['formats']
             video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
             video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
@@ -31,14 +40,69 @@ def get_available_formats(url):
             
             unique_resolutions.append(('bestaudio/best', 'Audio Only (MP3)'))
             return unique_resolutions, info['title']
-        except yt_dlp.utils.DownloadError as e:
+        except Exception as e:
             st.error(f"Error fetching video information: {str(e)}")
             return [], None
-        except Exception as e:
-            st.error(f"An unexpected error occurred: {str(e)}")
-            return [], None
 
-# ... [rest of the functions remain the same] ...
+def sanitize_filename(filename):
+    return "".join([c for c in filename if c.isalpha() or c.isdigit() or c in ' .-_']).rstrip()
+
+def update_progress(d, progress_bar, progress_text):
+    if d['status'] == 'downloading':
+        total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+        downloaded_bytes = d.get('downloaded_bytes', 0)
+        if total_bytes > 0:
+            progress = downloaded_bytes / total_bytes
+            progress_bar.progress(progress)
+            progress_text.text(f"Downloaded: {downloaded_bytes/1024/1024:.1f}MB / {total_bytes/1024/1024:.1f}MB")
+    elif d['status'] == 'finished':
+        progress_bar.progress(1.0)
+        progress_text.text("Download completed. Processing...")
+
+def download_video(url, format_id, progress_bar, progress_text):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        ydl_opts = {
+            'format': f'{format_id}+bestaudio/best' if format_id != 'bestaudio/best' else 'bestaudio/best',
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
+            'nocheckcertificate': True,
+            'ignoreerrors': True,
+            'no_color': True,
+            'cookiesfrombrowser': ('chrome',),  # Try to use cookies from Chrome
+        }
+        
+        if format_id == 'bestaudio/best':
+            ydl_opts.update({
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+            })
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if info is None:
+                    raise Exception("Unable to download video")
+                filename = ydl.prepare_filename(info)
+                
+                if format_id == 'bestaudio/best':
+                    filename = os.path.splitext(filename)[0] + '.mp3'
+            
+            if os.path.exists(filename):
+                sanitized_filename = sanitize_filename(os.path.basename(filename))
+                new_filename = os.path.join(temp_dir, sanitized_filename)
+                shutil.move(filename, new_filename)
+                
+                with open(new_filename, "rb") as file:
+                    file_content = file.read()
+                
+                return sanitized_filename, file_content
+            else:
+                raise Exception(f"Downloaded file not found: {filename}")
+        except Exception as e:
+            raise Exception(f"Error during download: {str(e)}")
 
 st.title("Video Downloader")
 
@@ -65,7 +129,6 @@ if url:
                         filename, file_content = download_video(url, selected_format_id, progress_bar, progress_text)
                         st.success("Download completed!")
                         
-                        # Create a download button
                         st.download_button(
                             label="Click here to download",
                             data=file_content,

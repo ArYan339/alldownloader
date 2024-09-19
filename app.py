@@ -24,7 +24,10 @@ def get_available_formats(url):
             if info is None:
                 raise Exception("Unable to extract video information")
             
-            formats = info['formats']
+            formats = info.get('formats', [])
+            if not formats:
+                raise Exception("No suitable formats found")
+            
             video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
             video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
             
@@ -39,7 +42,7 @@ def get_available_formats(url):
                     unique_resolutions.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
             
             unique_resolutions.append(('bestaudio/best', 'Audio Only (MP3)'))
-            return unique_resolutions, info['title']
+            return unique_resolutions, info.get('title', 'Untitled')
         except Exception as e:
             st.error(f"Error fetching video information: {str(e)}")
             return [], None

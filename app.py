@@ -29,20 +29,28 @@ def get_available_formats(url):
                 raise Exception("No suitable formats found")
             
             video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
-            video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
+            audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
             
-            unique_resolutions = []
-            seen_resolutions = set()
-            for f in video_formats:
-                resolution = f'{f.get("height", 0)}p'
-                fps = f.get('fps', 0)
-                key = (resolution, fps)
-                if key not in seen_resolutions:
-                    seen_resolutions.add(key)
-                    unique_resolutions.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
+            if not video_formats and not audio_formats:
+                raise Exception("No suitable formats found")
             
-            unique_resolutions.append(('bestaudio/best', 'Audio Only (MP3)'))
-            return unique_resolutions, info.get('title', 'Untitled')
+            unique_formats = []
+            
+            if video_formats:
+                video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
+                seen_resolutions = set()
+                for f in video_formats:
+                    resolution = f'{f.get("height", 0)}p'
+                    fps = f.get('fps', 0)
+                    key = (resolution, fps)
+                    if key not in seen_resolutions:
+                        seen_resolutions.add(key)
+                        unique_formats.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
+            
+            if audio_formats:
+                unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
+            
+            return unique_formats, info.get('title', 'Untitled')
         except Exception as e:
             st.error(f"Error fetching video information: {str(e)}")
             return [], None

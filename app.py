@@ -14,10 +14,9 @@ def get_available_formats(url):
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'ignoreerrors': False,  # Changed to False to see errors
+        'ignoreerrors': False,
         'no_color': True,
-        'cookiesfrombrowser': ('chrome',),
-        'verbose': True,  # Added for more detailed output
+        'verbose': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
@@ -82,10 +81,9 @@ def download_video(url, format_id, progress_bar, progress_text):
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
             'nocheckcertificate': True,
-            'ignoreerrors': False,  # Changed to False to see errors
+            'ignoreerrors': False,
             'no_color': True,
-            'cookiesfrombrowser': ('chrome',),
-            'verbose': True,  # Added for more detailed output
+            'verbose': True,
         }
         
         if format_id == 'bestaudio/best':

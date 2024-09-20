@@ -1,10 +1,20 @@
 import streamlit as st
-import yt_dlp
 import os
 import tempfile
 import shutil
 import re
 import random
+import subprocess
+import sys
+
+def install_latest_yt_dlp():
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "git+https://github.com/yt-dlp/yt-dlp.git"])
+
+try:
+    import yt_dlp
+except ImportError:
+    install_latest_yt_dlp()
+    import yt_dlp
 
 def is_valid_url(url):
     url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
@@ -27,8 +37,13 @@ def get_ydl_opts():
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'user_agent': get_random_user_agent(),
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        'extractor_args': {'youtube': {
+            'player_client': ['android', 'web'],
+            'skip': ['dash', 'hls'],
+        }},
         'socket_timeout': 30,
+        'nocheckcertificate': True,
+        'cookiesfrombrowser': ('chrome',),
     }
 
 def get_available_formats(url):
@@ -130,9 +145,9 @@ def download_video(url, format_id, progress_bar, progress_text):
             st.error(f"Error during download: {str(e)}")
             raise
 
-st.title("Video Downloader")
+st.title("YouTube Video Downloader")
 
-url = st.text_input("Enter the video URL:")
+url = st.text_input("Enter the YouTube video URL:")
 
 if url:
     if not is_valid_url(url):
@@ -167,4 +182,4 @@ if url:
         except Exception as e:
             st.error(f"An unexpected error occurred: {str(e)}")
 else:
-    st.info("Please enter a valid URL to start.")
+    st.info("Please enter a valid YouTube URL to start.")

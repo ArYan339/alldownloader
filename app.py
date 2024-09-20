@@ -4,30 +4,56 @@ import os
 import tempfile
 import shutil
 import re
+import random
+from fake_useragent import UserAgent
+import requests
 
 def is_valid_url(url):
     url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
     return url_pattern.match(url) is not None
 
+def get_random_user_agent():
+    ua = UserAgent()
+    return ua.random
+
 def get_ydl_opts():
+    user_agent = get_random_user_agent()
     return {
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'no_color': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'user_agent': user_agent,
         'referer': 'https://www.youtube.com/',
         'http_headers': {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         },
         'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
     }
+
+def get_video_info(url):
+    session = requests.Session()
+    response = session.get(url, headers=get_ydl_opts()['http_headers'])
+    if 'consent.youtube.com' in response.url:
+        st.warning("YouTube is requesting consent. Please visit the URL in a browser and accept the terms.")
+        return None
+    return response.text
 
 def get_available_formats(url):
     ydl_opts = get_ydl_opts()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
+            video_info = get_video_info(url)
+            if video_info is None:
+                return [], None
+            
             info = ydl.extract_info(url, download=False)
             if info is None:
                 st.error("Unable to extract video information.")

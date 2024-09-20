@@ -4,48 +4,37 @@ import os
 import tempfile
 import shutil
 import re
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import time
+import random
 
 def is_valid_url(url):
     url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
     return url_pattern.match(url) is not None
 
-def get_video_info(url):
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    
-    driver = webdriver.Chrome(options=chrome_options)
-    
-    try:
-        driver.get(url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        time.sleep(5)  # Additional wait to ensure page is fully loaded
-        
-        title = driver.title
-        page_source = driver.page_source
-        
-        return title, page_source
-    finally:
-        driver.quit()
+def get_random_user_agent():
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'
+    ]
+    return random.choice(user_agents)
 
-def get_available_formats(url):
-    ydl_opts = {
+def get_ydl_opts():
+    return {
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'ignoreerrors': False,
+        'user_agent': get_random_user_agent(),
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        'socket_timeout': 30,
     }
+
+def get_available_formats(url):
+    ydl_opts = get_ydl_opts()
     
     try:
-        title, page_source = get_video_info(url)
-        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
@@ -78,7 +67,7 @@ def get_available_formats(url):
             if audio_formats:
                 unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
             
-            return unique_formats, title
+            return unique_formats, info.get('title', 'Untitled')
     except Exception as e:
         st.error(f"Error fetching video information: {str(e)}")
         return [], None
@@ -100,11 +89,12 @@ def update_progress(d, progress_bar, progress_text):
 
 def download_video(url, format_id, progress_bar, progress_text):
     with tempfile.TemporaryDirectory() as temp_dir:
-        ydl_opts = {
+        ydl_opts = get_ydl_opts()
+        ydl_opts.update({
             'format': f'{format_id}+bestaudio/best' if format_id != 'bestaudio/best' else 'bestaudio/best',
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
-        }
+        })
         
         if format_id == 'bestaudio/best':
             ydl_opts.update({

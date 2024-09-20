@@ -6,6 +6,7 @@ import re
 import random
 import subprocess
 import sys
+import time
 
 def install_latest_yt_dlp():
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "git+https://github.com/yt-dlp/yt-dlp.git"])
@@ -43,49 +44,53 @@ def get_ydl_opts():
         }},
         'socket_timeout': 30,
         'nocheckcertificate': True,
-        'cookiesfrombrowser': ('chrome',),
     }
 
-def get_available_formats(url):
+def get_available_formats(url, max_retries=3, retry_delay=5):
     ydl_opts = get_ydl_opts()
     
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            if info is None:
-                raise Exception("Unable to extract video information.")
-            
-            formats = info.get('formats', [])
-            if not formats:
-                raise Exception("No formats found.")
-            
-            video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
-            audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
-            
-            if not video_formats and not audio_formats:
-                raise Exception("No suitable formats found.")
-            
-            unique_formats = []
-            
-            if video_formats:
-                video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
-                seen_resolutions = set()
-                for f in video_formats:
-                    resolution = f'{f.get("height", 0)}p'
-                    fps = f.get('fps', 0)
-                    key = (resolution, fps)
-                    if key not in seen_resolutions:
-                        seen_resolutions.add(key)
-                        unique_formats.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
-            
-            if audio_formats:
-                unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
-            
-            return unique_formats, info.get('title', 'Untitled')
-    except Exception as e:
-        st.error(f"Error fetching video information: {str(e)}")
-        return [], None
+    for attempt in range(max_retries):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if info is None:
+                    raise Exception("Unable to extract video information.")
+                
+                formats = info.get('formats', [])
+                if not formats:
+                    raise Exception("No formats found.")
+                
+                video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
+                audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
+                
+                if not video_formats and not audio_formats:
+                    raise Exception("No suitable formats found.")
+                
+                unique_formats = []
+                
+                if video_formats:
+                    video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
+                    seen_resolutions = set()
+                    for f in video_formats:
+                        resolution = f'{f.get("height", 0)}p'
+                        fps = f.get('fps', 0)
+                        key = (resolution, fps)
+                        if key not in seen_resolutions:
+                            seen_resolutions.add(key)
+                            unique_formats.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
+                
+                if audio_formats:
+                    unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
+                
+                return unique_formats, info.get('title', 'Untitled')
+        except Exception as e:
+            if attempt < max_retries - 1:
+                st.warning(f"Attempt {attempt + 1} failed. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                st.error(f"Error fetching video information after {max_retries} attempts: {str(e)}")
+                return [], None
 
 def sanitize_filename(filename):
     return "".join([c for c in filename if c.isalpha() or c.isdigit() or c in ' .-_']).rstrip()
@@ -102,7 +107,7 @@ def update_progress(d, progress_bar, progress_text):
         progress_bar.progress(1.0)
         progress_text.text("Download completed. Processing...")
 
-def download_video(url, format_id, progress_bar, progress_text):
+def download_video(url, format_id, progress_bar, progress_text, max_retries=3, retry_delay=5):
     with tempfile.TemporaryDirectory() as temp_dir:
         ydl_opts = get_ydl_opts()
         ydl_opts.update({
@@ -120,30 +125,35 @@ def download_video(url, format_id, progress_bar, progress_text):
                 }],
             })
         
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if info is None:
-                    raise Exception("Unable to download video")
-                filename = ydl.prepare_filename(info)
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    if info is None:
+                        raise Exception("Unable to download video")
+                    filename = ydl.prepare_filename(info)
+                    
+                    if format_id == 'bestaudio/best':
+                        filename = os.path.splitext(filename)[0] + '.mp3'
                 
-                if format_id == 'bestaudio/best':
-                    filename = os.path.splitext(filename)[0] + '.mp3'
-            
-            if os.path.exists(filename):
-                sanitized_filename = sanitize_filename(os.path.basename(filename))
-                new_filename = os.path.join(temp_dir, sanitized_filename)
-                shutil.move(filename, new_filename)
-                
-                with open(new_filename, "rb") as file:
-                    file_content = file.read()
-                
-                return sanitized_filename, file_content
-            else:
-                raise Exception(f"Downloaded file not found: {filename}")
-        except Exception as e:
-            st.error(f"Error during download: {str(e)}")
-            raise
+                if os.path.exists(filename):
+                    sanitized_filename = sanitize_filename(os.path.basename(filename))
+                    new_filename = os.path.join(temp_dir, sanitized_filename)
+                    shutil.move(filename, new_filename)
+                    
+                    with open(new_filename, "rb") as file:
+                        file_content = file.read()
+                    
+                    return sanitized_filename, file_content
+                else:
+                    raise Exception(f"Downloaded file not found: {filename}")
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    st.warning(f"Download attempt {attempt + 1} failed. Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    st.error(f"Error during download after {max_retries} attempts: {str(e)}")
+                    raise
 
 st.title("YouTube Video Downloader")
 

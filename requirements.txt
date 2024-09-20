@@ -1,4 +1,5 @@
 yt_dlp
+--upgrade yt-dlp
 fake-useragent
 cloudscraper
 selenium 

@@ -9,15 +9,23 @@ def is_valid_url(url):
     url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
     return url_pattern.match(url) is not None
 
-def get_available_formats(url):
-    ydl_opts = {
+def get_ydl_opts():
+    return {
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'no_color': True,
-        'verbose': True,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'referer': 'https://www.youtube.com/',
+        'http_headers': {
+            'Accept-Language': 'en-US,en;q=0.5',
+        },
+        'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
     }
+
+def get_available_formats(url):
+    ydl_opts = get_ydl_opts()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
@@ -27,14 +35,14 @@ def get_available_formats(url):
             
             formats = info.get('formats', [])
             if not formats:
-                st.error(f"No formats found. Available info: {info}")
+                st.error(f"No formats found.")
                 return [], None
             
             video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
             audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
             
             if not video_formats and not audio_formats:
-                st.error(f"No suitable formats found. Available formats: {formats}")
+                st.error(f"No suitable formats found.")
                 return [], None
             
             unique_formats = []
@@ -54,17 +62,8 @@ def get_available_formats(url):
                 unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
             
             return unique_formats, info.get('title', 'Untitled')
-        except yt_dlp.utils.ExtractorError as e:
-            if "Sign in to confirm you're not a bot" in str(e):
-                st.error("YouTube is requesting a bot check. Please try the following:")
-                st.error("1. Open the video URL in a browser and complete any CAPTCHA or verification.")
-                st.error("2. Try again in a few minutes.")
-                st.error("3. If the problem persists, you may need to use a different IP address or wait longer.")
-            else:
-                st.error(f"Error fetching video information: {str(e)}")
-            return [], None
         except Exception as e:
-            st.error(f"An unexpected error occurred: {str(e)}")
+            st.error(f"Error fetching video information: {str(e)}")
             return [], None
 
 def sanitize_filename(filename):
@@ -84,15 +83,12 @@ def update_progress(d, progress_bar, progress_text):
 
 def download_video(url, format_id, progress_bar, progress_text):
     with tempfile.TemporaryDirectory() as temp_dir:
-        ydl_opts = {
+        ydl_opts = get_ydl_opts()
+        ydl_opts.update({
             'format': f'{format_id}+bestaudio/best' if format_id != 'bestaudio/best' else 'bestaudio/best',
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
-            'nocheckcertificate': True,
-            'ignoreerrors': False,
-            'no_color': True,
-            'verbose': True,
-        }
+        })
         
         if format_id == 'bestaudio/best':
             ydl_opts.update({
@@ -124,15 +120,6 @@ def download_video(url, format_id, progress_bar, progress_text):
                 return sanitized_filename, file_content
             else:
                 raise Exception(f"Downloaded file not found: {filename}")
-        except yt_dlp.utils.ExtractorError as e:
-            if "Sign in to confirm you're not a bot" in str(e):
-                st.error("YouTube is requesting a bot check. Please try the following:")
-                st.error("1. Open the video URL in a browser and complete any CAPTCHA or verification.")
-                st.error("2. Try again in a few minutes.")
-                st.error("3. If the problem persists, you may need to use a different IP address or wait longer.")
-            else:
-                st.error(f"Error during download: {str(e)}")
-            raise
         except Exception as e:
             st.error(f"Error during download: {str(e)}")
             raise

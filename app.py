@@ -14,25 +14,29 @@ def get_available_formats(url):
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'ignoreerrors': True,
+        'ignoreerrors': False,  # Changed to False to see errors
         'no_color': True,
-        'cookiesfrombrowser': ('chrome',),  # Try to use cookies from Chrome
+        'cookiesfrombrowser': ('chrome',),
+        'verbose': True,  # Added for more detailed output
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
             if info is None:
-                raise Exception("Unable to extract video information")
+                st.error(f"Unable to extract video information. Full debug info: {ydl.get_debug_info()}")
+                return [], None
             
             formats = info.get('formats', [])
             if not formats:
-                raise Exception("No suitable formats found")
+                st.error(f"No formats found. Available info: {info}")
+                return [], None
             
             video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
             audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
             
             if not video_formats and not audio_formats:
-                raise Exception("No suitable formats found")
+                st.error(f"No suitable formats found. Available formats: {formats}")
+                return [], None
             
             unique_formats = []
             
@@ -53,6 +57,7 @@ def get_available_formats(url):
             return unique_formats, info.get('title', 'Untitled')
         except Exception as e:
             st.error(f"Error fetching video information: {str(e)}")
+            st.error(f"Full debug info: {ydl.get_debug_info()}")
             return [], None
 
 def sanitize_filename(filename):
@@ -77,9 +82,10 @@ def download_video(url, format_id, progress_bar, progress_text):
             'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
             'nocheckcertificate': True,
-            'ignoreerrors': True,
+            'ignoreerrors': False,  # Changed to False to see errors
             'no_color': True,
-            'cookiesfrombrowser': ('chrome',),  # Try to use cookies from Chrome
+            'cookiesfrombrowser': ('chrome',),
+            'verbose': True,  # Added for more detailed output
         }
         
         if format_id == 'bestaudio/best':
@@ -113,7 +119,9 @@ def download_video(url, format_id, progress_bar, progress_text):
             else:
                 raise Exception(f"Downloaded file not found: {filename}")
         except Exception as e:
-            raise Exception(f"Error during download: {str(e)}")
+            st.error(f"Error during download: {str(e)}")
+            st.error(f"Full debug info: {ydl.get_debug_info()}")
+            raise
 
 st.title("Video Downloader")
 
@@ -123,6 +131,7 @@ if url:
     if not is_valid_url(url):
         st.warning("Please enter a valid URL.")
     else:
+        st.write(f"Attempting to fetch video information for URL: {url}")
         try:
             formats, video_title = get_available_formats(url)
             if not formats:

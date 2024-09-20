@@ -22,7 +22,7 @@ def get_available_formats(url):
         try:
             info = ydl.extract_info(url, download=False)
             if info is None:
-                st.error(f"Unable to extract video information. Full debug info: {ydl.get_debug_info()}")
+                st.error("Unable to extract video information.")
                 return [], None
             
             formats = info.get('formats', [])
@@ -54,9 +54,17 @@ def get_available_formats(url):
                 unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
             
             return unique_formats, info.get('title', 'Untitled')
+        except yt_dlp.utils.ExtractorError as e:
+            if "Sign in to confirm you're not a bot" in str(e):
+                st.error("YouTube is requesting a bot check. Please try the following:")
+                st.error("1. Open the video URL in a browser and complete any CAPTCHA or verification.")
+                st.error("2. Try again in a few minutes.")
+                st.error("3. If the problem persists, you may need to use a different IP address or wait longer.")
+            else:
+                st.error(f"Error fetching video information: {str(e)}")
+            return [], None
         except Exception as e:
-            st.error(f"Error fetching video information: {str(e)}")
-            st.error(f"Full debug info: {ydl.get_debug_info()}")
+            st.error(f"An unexpected error occurred: {str(e)}")
             return [], None
 
 def sanitize_filename(filename):
@@ -116,9 +124,17 @@ def download_video(url, format_id, progress_bar, progress_text):
                 return sanitized_filename, file_content
             else:
                 raise Exception(f"Downloaded file not found: {filename}")
+        except yt_dlp.utils.ExtractorError as e:
+            if "Sign in to confirm you're not a bot" in str(e):
+                st.error("YouTube is requesting a bot check. Please try the following:")
+                st.error("1. Open the video URL in a browser and complete any CAPTCHA or verification.")
+                st.error("2. Try again in a few minutes.")
+                st.error("3. If the problem persists, you may need to use a different IP address or wait longer.")
+            else:
+                st.error(f"Error during download: {str(e)}")
+            raise
         except Exception as e:
             st.error(f"Error during download: {str(e)}")
-            st.error(f"Full debug info: {ydl.get_debug_info()}")
             raise
 
 st.title("Video Downloader")

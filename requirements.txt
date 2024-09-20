@@ -1,5 +1,5 @@
-upgrade yt_dlp
-fake-useragent
-cloudscraper
+yt_dlp
+#fake-useragent
+#cloudscraper
 selenium 
 webdriver-manager

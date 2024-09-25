@@ -37,15 +37,6 @@ def get_random_user_agent():
     ]
     return random.choice(user_agents)
 
-class CustomYoutubeExtractor(yt_dlp.extractor.youtube.YoutubeIE):
-    def _real_extract(self, url):
-        video_id = self._match_id(url)
-        webpage = self._download_webpage(url, video_id)
-        player_response = self._extract_yt_initial_variable(webpage, 'ytInitialPlayerResponse')
-        if not player_response:
-            raise yt_dlp.utils.ExtractorError("Unable to extract player response", expected=True)
-        return self._parse_player_response(player_response, video_id)
-
 def get_ydl_opts():
     return {
         'quiet': True,
@@ -60,8 +51,8 @@ def get_ydl_opts():
         'socket_timeout': 30,
         'retry_sleep_functions': {'429': lambda _: 60},
         'extract_flat': 'in_playlist',
-        'extractor_class': CustomYoutubeExtractor,
     }
+
 def get_available_formats(url, max_retries=5, retry_delay=10):
     for attempt in range(max_retries):
         try:
@@ -111,6 +102,7 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                 else:
                     st.error(f"Error fetching video information after {max_retries} attempts.")
                     return [], None
+
 def sanitize_filename(filename):
     return "".join([c for c in filename if c.isalpha() or c.isdigit() or c in ' .-_']).rstrip()
 

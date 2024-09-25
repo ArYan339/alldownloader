@@ -62,7 +62,6 @@ def get_ydl_opts():
         'extract_flat': 'in_playlist',
         'extractor_class': CustomYoutubeExtractor,
     }
-
 def get_available_formats(url, max_retries=5, retry_delay=10):
     for attempt in range(max_retries):
         try:
@@ -100,15 +99,18 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                     unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
                 
                 return unique_formats, info.get('title', 'Untitled')
-        except Exception as e:
-            st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-            if attempt < max_retries - 1:
-                st.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                st.error(f"Error fetching video information after {max_retries} attempts.")
+        except yt_dlp.utils.DownloadError as e:
+            if "Sign in to confirm you're not a bot" in str(e):
+                st.error("YouTube is requiring sign-in to confirm you're not a bot. Please try a different video URL.")
                 return [], None
-
+            else:
+                st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_retries - 1:
+                    st.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    st.error(f"Error fetching video information after {max_retries} attempts.")
+                    return [], None
 def sanitize_filename(filename):
     return "".join([c for c in filename if c.isalpha() or c.isdigit() or c in ' .-_']).rstrip()
 

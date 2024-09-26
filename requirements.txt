@@ -1,4 +1,5 @@
- yt-dlp -U
+ yt-dlp 
+pip install --upgrade pip
 fake-useragent
 #cloudscraper
 #selenium 

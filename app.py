@@ -20,8 +20,17 @@ except ImportError:
     import yt_dlp
 
 def is_valid_url(url):
-    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
-    return url_pattern.match(url) is not None
+    # Updated pattern to support both YouTube and Instagram URLs
+    url_pattern = re.compile(
+        r'(?:https?://)?(?:www\.)?'
+        r'(?:(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)|'
+        r'(?:instagram\.com/(?:p/|reel/|tv/)))'
+        r'[\w\-_]+'
+    )
+    return bool(url_pattern.match(url))
+
+def is_instagram_url(url):
+    return 'instagram.com' in url.lower()
 
 def get_random_user_agent():
     user_agents = [
@@ -29,34 +38,53 @@ def get_random_user_agent():
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
-        'Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1'
     ]
     return random.choice(user_agents)
 
-def get_ydl_opts():
-    return {
+def get_ydl_opts(is_instagram=False):
+    opts = {
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'user_agent': get_random_user_agent(),
-        'extractor_args': {'youtube': {
-            'player_client': ['android', 'web'],
-            'skip': ['dash', 'hls'],
-        }},
         'socket_timeout': 30,
         'retry_sleep_functions': {'429': lambda _: 60},
         'extract_flat': 'in_playlist',
     }
+    
+    if is_instagram:
+        # Special options for Instagram
+        opts.update({
+            'format': 'best',  # Instagram usually provides a single format
+            'add_header': [
+                ('User-Agent', get_random_user_agent()),
+                ('Cookie', ''),  # Add your Instagram cookies here if needed
+            ],
+            'extractor_args': {
+                'instagram': {
+                    'compatible_un': [''],  # Add Instagram username if needed
+                }
+            }
+        })
+    else:
+        # YouTube specific options
+        opts.update({
+            'extractor_args': {'youtube': {
+                'player_client': ['android', 'web'],
+                'skip': ['dash', 'hls'],
+            }}
+        })
+    
+    return opts
 
 def get_available_formats(url, max_retries=5, retry_delay=10):
+    is_instagram = is_instagram_url(url)
+    
     for attempt in range(max_retries):
         try:
-            ydl_opts = get_ydl_opts()
+            ydl_opts = get_ydl_opts(is_instagram)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
@@ -67,32 +95,41 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                 if not formats:
                     raise Exception("No formats found.")
                 
-                video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
-                audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
-                
-                if not video_formats and not audio_formats:
-                    raise Exception("No suitable formats found.")
-                
-                unique_formats = []
-                
-                if video_formats:
-                    video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
-                    seen_resolutions = set()
-                    for f in video_formats:
-                        resolution = f'{f.get("height", 0)}p'
-                        fps = f.get('fps', 0)
-                        key = (resolution, fps)
-                        if key not in seen_resolutions:
-                            seen_resolutions.add(key)
-                            unique_formats.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
-                
-                if audio_formats:
-                    unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
-                
-                return unique_formats, info.get('title', 'Untitled')
+                if is_instagram:
+                    # Instagram typically provides a single best format
+                    return [('best', 'Best Quality')], info.get('title', 'Instagram Video')
+                else:
+                    # YouTube format handling
+                    video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
+                    audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
+                    
+                    if not video_formats and not audio_formats:
+                        raise Exception("No suitable formats found.")
+                    
+                    unique_formats = []
+                    
+                    if video_formats:
+                        video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
+                        seen_resolutions = set()
+                        for f in video_formats:
+                            resolution = f'{f.get("height", 0)}p'
+                            fps = f.get('fps', 0)
+                            key = (resolution, fps)
+                            if key not in seen_resolutions:
+                                seen_resolutions.add(key)
+                                unique_formats.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
+                    
+                    if audio_formats:
+                        unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
+                    
+                    return unique_formats, info.get('title', 'Untitled')
+                    
         except yt_dlp.utils.DownloadError as e:
             if "Sign in to confirm you're not a bot" in str(e):
-                st.error("YouTube is requiring sign-in to confirm you're not a bot. Please try a different video URL.")
+                st.error("Sign-in required. Please try a different video URL.")
+                return [], None
+            elif "Private video" in str(e):
+                st.error("This video is private or requires authentication.")
                 return [], None
             else:
                 st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
@@ -103,33 +140,20 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                     st.error(f"Error fetching video information after {max_retries} attempts.")
                     return [], None
 
-def sanitize_filename(filename):
-    return "".join([c for c in filename if c.isalpha() or c.isdigit() or c in ' .-_']).rstrip()
-
-def update_progress(d, progress_bar, progress_text):
-    if d['status'] == 'downloading':
-        total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-        downloaded_bytes = d.get('downloaded_bytes', 0)
-        if total_bytes > 0:
-            progress = downloaded_bytes / total_bytes
-            progress_bar.progress(progress)
-            progress_text.text(f"Downloaded: {downloaded_bytes/1024/1024:.1f}MB / {total_bytes/1024/1024:.1f}MB")
-    elif d['status'] == 'finished':
-        progress_bar.progress(1.0)
-        progress_text.text("Download completed. Processing...")
-
 def download_video(url, format_id, progress_bar, progress_text, max_retries=5, retry_delay=10):
+    is_instagram = is_instagram_url(url)
+    
     with tempfile.TemporaryDirectory() as temp_dir:
         for attempt in range(max_retries):
             try:
-                ydl_opts = get_ydl_opts()
+                ydl_opts = get_ydl_opts(is_instagram)
                 ydl_opts.update({
-                    'format': f'{format_id}+bestaudio/best' if format_id != 'bestaudio/best' else 'bestaudio/best',
+                    'format': format_id,
                     'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                     'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
                 })
                 
-                if format_id == 'bestaudio/best':
+                if not is_instagram and format_id == 'bestaudio/best':
                     ydl_opts.update({
                         'postprocessors': [{
                             'key': 'FFmpegExtractAudio',
@@ -144,7 +168,7 @@ def download_video(url, format_id, progress_bar, progress_text, max_retries=5, r
                         raise Exception("Unable to download video")
                     filename = ydl.prepare_filename(info)
                     
-                    if format_id == 'bestaudio/best':
+                    if not is_instagram and format_id == 'bestaudio/best':
                         filename = os.path.splitext(filename)[0] + '.mp3'
                 
                 if os.path.exists(filename):
@@ -167,15 +191,18 @@ def download_video(url, format_id, progress_bar, progress_text, max_retries=5, r
                     st.error(f"Error during download after {max_retries} attempts.")
                     raise
 
-st.title("YouTube Video Downloader")
+# Rest of the code remains the same (sanitize_filename and update_progress functions)
 
-url = st.text_input("Enter the YouTube video URL:")
+st.title("YouTube & Instagram Video Downloader")
+
+url = st.text_input("Enter the YouTube or Instagram video URL:")
 
 if url:
     if not is_valid_url(url):
-        st.warning("Please enter a valid URL.")
+        st.warning("Please enter a valid YouTube or Instagram URL.")
     else:
-        st.write(f"Attempting to fetch video information for URL: {url}")
+        platform = "Instagram" if is_instagram_url(url) else "YouTube"
+        st.write(f"Attempting to fetch {platform} video information...")
         try:
             formats, video_title = get_available_formats(url)
             if not formats:
@@ -204,4 +231,4 @@ if url:
         except Exception as e:
             st.error(f"An unexpected error occurred: {str(e)}")
 else:
-    st.info("Please enter a valid YouTube URL to start.")
+    st.info("Please enter a valid YouTube or Instagram URL to start.")

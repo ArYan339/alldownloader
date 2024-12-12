@@ -1,6 +1,5 @@
  yt-dlp 
 fake-useragent
-gunicorn
 #cloudscraper
 #selenium 
 #webdriver-manager

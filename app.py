@@ -39,10 +39,17 @@ def get_ydl_opts():
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'user_agent': get_random_user_agent(),
-        'format': 'best[height<=360]',  # Limit to 360p
         'socket_timeout': 30,
         'retry_sleep_functions': {'429': lambda _: 60},
     }
+
+def format_filesize(bytes):
+    """Convert bytes to human readable format"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes < 1024:
+            return f"{bytes:.1f} {unit}"
+        bytes /= 1024
+    return f"{bytes:.1f} TB"
 
 def get_available_formats(url, max_retries=5, retry_delay=10):
     for attempt in range(max_retries):
@@ -58,9 +65,8 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                 if not formats:
                     raise Exception("No formats found.")
                 
-                # Filter formats to only include videos up to 360p and audio
-                video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none' 
-                               and f.get('height', 0) <= 360]
+                # Filter and categorize formats
+                video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
                 audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none' 
                                and f.get('vcodec', 'none') == 'none']
                 
@@ -70,18 +76,38 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                 unique_formats = []
                 seen_resolutions = set()
                 
-                # Add video formats up to 360p
+                # Sort video formats by resolution and fps
+                video_formats.sort(key=lambda x: (
+                    x.get('height', 0),
+                    x.get('fps', 0),
+                    x.get('filesize', 0) or x.get('filesize_approx', 0)
+                ), reverse=True)
+                
+                # Add video formats with resolution and fps info
                 for f in video_formats:
                     height = f.get('height', 0)
-                    if height <= 360:
-                        resolution = f'{height}p'
-                        if resolution not in seen_resolutions:
-                            seen_resolutions.add(resolution)
-                            unique_formats.append((f['format_id'], f'{resolution} - {f["ext"]}'))
+                    fps = f.get('fps', 0)
+                    ext = f.get('ext', '')
+                    filesize = f.get('filesize', 0) or f.get('filesize_approx', 0)
+                    
+                    resolution = f'{height}p'
+                    if height >= 720:  # Add fps info for HD content
+                        resolution = f'{height}p{fps}'
+                    
+                    format_key = (resolution, fps, ext)
+                    if format_key not in seen_resolutions:
+                        seen_resolutions.add(format_key)
+                        size_info = f" ({format_filesize(filesize)})" if filesize else ""
+                        format_str = f"{resolution} - {ext.upper()}{size_info}"
+                        unique_formats.append((f['format_id'], format_str))
                 
-                # Add audio option
+                # Add best audio option
                 if audio_formats:
-                    unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
+                    best_audio = max(audio_formats, 
+                                   key=lambda x: x.get('filesize', 0) or x.get('filesize_approx', 0))
+                    filesize = best_audio.get('filesize', 0) or best_audio.get('filesize_approx', 0)
+                    size_info = f" ({format_filesize(filesize)})" if filesize else ""
+                    unique_formats.append(('bestaudio/best', f'Audio Only (MP3){size_info}'))
                 
                 return unique_formats, info.get('title', 'Untitled')
         except Exception as e:
@@ -100,7 +126,7 @@ def update_progress(d, progress_bar, progress_text):
         if total_bytes > 0:
             progress = downloaded_bytes / total_bytes
             progress_bar.progress(progress)
-            progress_text.text(f"Downloaded: {downloaded_bytes/1024/1024:.1f}MB / {total_bytes/1024/1024:.1f}MB")
+            progress_text.text(f"Downloaded: {format_filesize(downloaded_bytes)} / {format_filesize(total_bytes)}")
     elif d['status'] == 'finished':
         progress_bar.progress(1.0)
         progress_text.text("Download completed. Processing...")
@@ -110,20 +136,24 @@ def download_video(url, format_id, progress_bar, progress_text, max_retries=5, r
         for attempt in range(max_retries):
             try:
                 ydl_opts = get_ydl_opts()
-                ydl_opts.update({
-                    'format': format_id if format_id != 'bestaudio/best' else 'bestaudio/best',
-                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                    'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
-                })
-                
                 if format_id == 'bestaudio/best':
                     ydl_opts.update({
+                        'format': 'bestaudio/best',
                         'postprocessors': [{
                             'key': 'FFmpegExtractAudio',
                             'preferredcodec': 'mp3',
-                            'preferredquality': '192',
+                            'preferredquality': '320',  # Increased audio quality
                         }],
                     })
+                else:
+                    ydl_opts.update({
+                        'format': f'{format_id}+bestaudio/best',  # Combine best video with best audio
+                    })
+                
+                ydl_opts.update({
+                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                    'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
+                })
                 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
@@ -151,7 +181,8 @@ def download_video(url, format_id, progress_bar, progress_text, max_retries=5, r
                     continue
                 raise
 
-st.title("YouTube Video Downloader (360p)")
+st.title("YouTube Video Downloader (4K Support)")
+st.markdown("Download videos in high quality (up to 4K) or extract audio")
 
 url = st.text_input("Enter the YouTube video URL:")
 
@@ -159,7 +190,7 @@ if url:
     if not is_valid_url(url):
         st.warning("Please enter a valid URL.")
     else:
-        st.write(f"Attempting to fetch video information for URL: {url}")
+        st.write(f"Fetching available formats for: {url}")
         try:
             formats, video_title = get_available_formats(url)
             if not formats:
@@ -167,7 +198,14 @@ if url:
             else:
                 st.success(f"Video found: {video_title}")
                 format_dict = dict(formats)
-                selected_format = st.selectbox("Choose format:", [f[1] for f in formats])
+                
+                # Group formats by quality
+                format_options = [f[1] for f in formats]
+                selected_format = st.selectbox(
+                    "Choose quality:", 
+                    format_options,
+                    help="Higher quality videos will have larger file sizes"
+                )
                 selected_format_id = [k for k, v in format_dict.items() if v == selected_format][0]
 
                 if st.button("Download"):

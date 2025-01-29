@@ -28,23 +28,9 @@ def get_random_user_agent():
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
-        'Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36'
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15'
     ]
     return random.choice(user_agents)
-
-class CustomYoutubeExtractor(yt_dlp.extractor.youtube.YoutubeIE):
-    def _real_extract(self, url):
-        video_id = self._match_id(url)
-        webpage = self._download_webpage(url, video_id)
-        player_response = self._extract_yt_initial_variable(webpage, 'ytInitialPlayerResponse')
-        if not player_response:
-            raise yt_dlp.utils.ExtractorError("Unable to extract player response", expected=True)
-        return self._parse_player_response(player_response, video_id)
 
 def get_ydl_opts():
     return {
@@ -53,15 +39,11 @@ def get_ydl_opts():
         'nocheckcertificate': True,
         'ignoreerrors': False,
         'user_agent': get_random_user_agent(),
-        'extractor_args': {'youtube': {
-            'player_client': ['android', 'web'],
-            'skip': ['dash', 'hls'],
-        }},
+        'format': 'best[height<=360]',  # Limit to 360p
         'socket_timeout': 30,
         'retry_sleep_functions': {'429': lambda _: 60},
-        'extract_flat': 'in_playlist',
-        'extractor_class': CustomYoutubeExtractor,
     }
+
 def get_available_formats(url, max_retries=5, retry_delay=10):
     for attempt in range(max_retries):
         try:
@@ -76,41 +58,38 @@ def get_available_formats(url, max_retries=5, retry_delay=10):
                 if not formats:
                     raise Exception("No formats found.")
                 
-                video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none']
-                audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none']
+                # Filter formats to only include videos up to 360p and audio
+                video_formats = [f for f in formats if f.get('vcodec', 'none') != 'none' 
+                               and f.get('height', 0) <= 360]
+                audio_formats = [f for f in formats if f.get('acodec', 'none') != 'none' 
+                               and f.get('vcodec', 'none') == 'none']
                 
                 if not video_formats and not audio_formats:
                     raise Exception("No suitable formats found.")
                 
                 unique_formats = []
+                seen_resolutions = set()
                 
-                if video_formats:
-                    video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
-                    seen_resolutions = set()
-                    for f in video_formats:
-                        resolution = f'{f.get("height", 0)}p'
-                        fps = f.get('fps', 0)
-                        key = (resolution, fps)
-                        if key not in seen_resolutions:
-                            seen_resolutions.add(key)
-                            unique_formats.append((f['format_id'], f'{resolution} - {fps}fps - {f["ext"]}'))
+                # Add video formats up to 360p
+                for f in video_formats:
+                    height = f.get('height', 0)
+                    if height <= 360:
+                        resolution = f'{height}p'
+                        if resolution not in seen_resolutions:
+                            seen_resolutions.add(resolution)
+                            unique_formats.append((f['format_id'], f'{resolution} - {f["ext"]}'))
                 
+                # Add audio option
                 if audio_formats:
                     unique_formats.append(('bestaudio/best', 'Audio Only (MP3)'))
                 
                 return unique_formats, info.get('title', 'Untitled')
-        except yt_dlp.utils.DownloadError as e:
-            if "Sign in to confirm you're not a bot" in str(e):
-                st.error("YouTube is requiring sign-in to confirm you're not a bot. Please try a different video URL.")
-                return [], None
-            else:
-                st.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-                if attempt < max_retries - 1:
-                    st.info(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                else:
-                    st.error(f"Error fetching video information after {max_retries} attempts.")
-                    return [], None
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+            raise
+
 def sanitize_filename(filename):
     return "".join([c for c in filename if c.isalpha() or c.isdigit() or c in ' .-_']).rstrip()
 
@@ -132,7 +111,7 @@ def download_video(url, format_id, progress_bar, progress_text, max_retries=5, r
             try:
                 ydl_opts = get_ydl_opts()
                 ydl_opts.update({
-                    'format': f'{format_id}+bestaudio/best' if format_id != 'bestaudio/best' else 'bestaudio/best',
+                    'format': format_id if format_id != 'bestaudio/best' else 'bestaudio/best',
                     'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
                     'progress_hooks': [lambda d: update_progress(d, progress_bar, progress_text)],
                 })
@@ -167,15 +146,12 @@ def download_video(url, format_id, progress_bar, progress_text, max_retries=5, r
                 else:
                     raise Exception(f"Downloaded file not found: {filename}")
             except Exception as e:
-                st.warning(f"Download attempt {attempt + 1} failed: {str(e)}")
                 if attempt < max_retries - 1:
-                    st.info(f"Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
-                else:
-                    st.error(f"Error during download after {max_retries} attempts.")
-                    raise
+                    continue
+                raise
 
-st.title("YouTube Video Downloader")
+st.title("YouTube Video Downloader (360p)")
 
 url = st.text_input("Enter the YouTube video URL:")
 
